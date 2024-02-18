@@ -12,7 +12,8 @@ class AssetInfo:
     nativeVersion: str = ''
     uuid: str = ''
     nativeExt: str = ''
-    realPath:str = ''
+    realPath: str = ''
+
 
 @dataclass
 class PackInfo:
@@ -62,8 +63,8 @@ class ManifestJson:
         return urlDict
 
     def _parseTexture2D_Meta(self, data: str):
-        packconfig = data.split(',', 1)
-        match packconfig[0]:
+        packConfig = data.split(',', 1)
+        match packConfig[0]:
             case '0':
                 return '.png'
             case '1':
@@ -106,7 +107,7 @@ class ManifestJson:
                             return self._parseTexture2D_Meta(data[0])
                 elif isinstance(data, str):
                     if data.count(',') == 7:
-                        return self._parseTexture2D_Meta(data[0])
+                        return self._parseTexture2D_Meta(data)
 
             except (IndexError, TypeError, KeyError):
                 return
@@ -144,5 +145,5 @@ class ManifestJson:
         return urls
 
     def setRealPaths(self):
-        for i,j in self.jsondata['paths'].items():
+        for i, j in self.jsondata['paths'].items():
             self.assetList[int(i)].realPath = j[0]
