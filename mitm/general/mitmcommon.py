@@ -1,11 +1,14 @@
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, unquote
 from mitmproxy import http
 from loguru import logger
 import mimetypes
 import os
 import pickle
 
-__version__ = 202402182227
+
+__version__ = 2024041201
+
+mimetypes.add_type('application/wasm', '.wasm')
 
 
 def setmitmNoQueryPath():
@@ -34,7 +37,7 @@ class GeneralFileSaver:
 
     def should_handle(self, flow: http.HTTPFlow) -> bool:
         if (flow.request.pretty_host in self.blacklistHost or
-                flow.request.pretty_host + flow.request.noQueryPath in self.blacklistHostPath):
+                flow.request.pretty_host + flow.request.noQueryPath in self.blacklistHostPath) or flow.request.method == 'OPTIONS':
             return False
         return True
 
@@ -52,7 +55,7 @@ class GeneralFileSaver:
                 url_path += "__mitmindex__.html"
 
             # Normalize and create the full file path
-            file_name = os.path.join(self.dataPath, flow.request.pretty_host, url_path.removeprefix('/'))
+            file_name = unquote(os.path.join(self.dataPath, flow.request.pretty_host, url_path.removeprefix('/')))
             # Create the directory structure if it doesn't exist
             os.makedirs(os.path.dirname(file_name), exist_ok=True)
 
@@ -101,7 +104,7 @@ class GeneralFileResponser(GeneralFileSaver):
         if not url_path or url_path.endswith('/'):
             url_path += "__mitmindex__.html"
 
-        file_name = os.path.join(self.dataPath, flow.request.pretty_host, url_path.removeprefix('/'))
+        file_name = os.path.join(self.dataPath, flow.request.pretty_host, unquote(url_path.removeprefix('/')))
         if os.path.exists(file_name):
             return file_name
         return None
@@ -111,11 +114,14 @@ class GeneralFileResponser(GeneralFileSaver):
         if os.path.exists(headerPath):
             with open(headerPath, 'rb') as f:
                 headerInfo = pickle.load(f)
+
         else:
             headerInfo = {}
             contentType = mimetypes.guess_type(local_file)[0]
             if contentType:
-                headerInfo[b'Content-Type'] = contentType
+                headerInfo['Content-Type'] = contentType
+        headerInfo['Access-Control-Allow-Origin'] = '*'
+        headerInfo['Access-Control-Allow-Headers'] = '*'
         logger.info(f'serving file :{local_file}')
         with open(local_file, 'rb') as f:
             fileData = f.read()
@@ -129,4 +135,6 @@ class optionsOK:
     def request(self, flow):
         if flow.request.method == 'OPTIONS':
             flow.response = http.Response.make(204)
+            flow.response.headers['Access-Control-Allow-Origin'] = '*'
+            flow.response.headers['Access-Control-Allow-Headers'] = '*'
             flow.response.headers['allow'] = 'OPTIONS,GET,HEAD,POST'
