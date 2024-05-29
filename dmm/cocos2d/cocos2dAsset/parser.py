@@ -34,13 +34,22 @@ class ManifestJson:
             if isinstance(point, int):
                 self.assetList[point].importType = 'IND'
                 self.assetList[point].importVersion = versions['import'][i + 1]
+            elif len(point) == 22:  # for debug resource
+                self.assetList[self._getDebugResourceLocation(point)].importType = 'IND'
+                self.assetList[self._getDebugResourceLocation(point)].importVersion = versions['import'][i + 1]
             else:
                 self.packinfoDict[point] = PackInfo(versions['import'][i + 1])
         for i in range(0, len(versions['native']), 2):
             point = versions['native'][i]
-            self.assetList[point].nativeVersion = versions['native'][i + 1]
+            if isinstance(point, int):
+                self.assetList[point].nativeVersion = versions['native'][i + 1]
+            else:
+                self.assetList[self._getDebugResourceLocation(point)].nativeVersion = versions['native'][i + 1]
         for i, j in self.jsondata['packs'].items():
             self.packinfoDict[i].packPoint = j
+
+    def _getDebugResourceLocation(self, uuid):
+        return self.jsondata['uuids'].index(uuid)
 
     def convertInfoToUrl(self, resType, resid, version, ext):
         '''
@@ -131,6 +140,8 @@ class ManifestJson:
             if ext:
                 ext.reverse()
                 for i in point:
+                    if not isinstance(i, int):
+                        i = self._getDebugResourceLocation(i)
                     if self.assetList[i].nativeVersion:
                         self.assetList[i].nativeExt = ext.pop()
 
@@ -146,4 +157,6 @@ class ManifestJson:
 
     def setRealPaths(self):
         for i, j in self.jsondata['paths'].items():
-            self.assetList[int(i)].realPath = j[0]
+            if not i.isdigit():
+                i = self._getDebugResourceLocation(i)
+                self.assetList[int(i)].realPath = j[0]
