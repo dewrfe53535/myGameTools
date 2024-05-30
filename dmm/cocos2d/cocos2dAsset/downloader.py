@@ -7,14 +7,14 @@ import chompjs
 from tenacity import retry, stop_after_attempt, wait_fixed
 import json
 from urllib.parse import urlparse
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
 
 
 class Session(requests.Session):
     @retry(
         stop=stop_after_attempt(10),
-        wait=wait_fixed(5),
+        wait=wait_fixed(2),
 
     )
     def request(self, method, url, **kwargs):
@@ -36,11 +36,10 @@ class assetDownloader:
         self.manifestDataDict = {}
         self.jsurl = '/bin/assets/{typename}/index.{version}.js'
         self.configurl = '/bin/assets/{typename}/config.{version}.json'
-        self.thread_semaphore = threading.Semaphore(20)
 
     def convertUrltoPath(self, url: str):
         url = urlparse(url)
-        return os.path.join(Config.downloader_savepath, url.netloc, url.path.strip('/'))
+        return os.path.join(Config.downloader_savepath, url.netloc.replace(':', '#COLON#'), url.path.strip('/'))
 
     def downloadAndSaveBinary(self, url, overwrite=False):
         path = self.convertUrltoPath(url)
@@ -123,24 +122,18 @@ class assetDownloader:
         mj.setInfoFromimport(point, json.loads(importData))
         self.saveTextFile(localPath, importData)
 
-    def _MTdownloadAndSetimport(self, mj: ManifestJson, url, point, useLocal=True):
-        with self.thread_semaphore:
-            self.downloadAndSetImport(mj, url, point, useLocal=True)
-
     def MTdownloadAndSetimport(self, mj: ManifestJson, downloadDict: dict, useLocal=True):
-        for point, url in downloadDict.items():
-            thread = threading.Thread(target=self._MTdownloadAndSetimport, args=(mj, url, point, useLocal))
-            thread.start()
-            thread.join()
+        with ThreadPoolExecutor(max_workers=Config.downloader_threadnum) as executor:
+            for point, url in downloadDict.items():
+                executor.submit(self.downloadAndSetImport, mj, url, point, useLocal)
 
     def MTdownloadAllNative(self, mj: ManifestJson, overwrite=False):
-        urlList: list[str] = mj.getAllNativeUrl()
-        for i in urlList:
-            thread = threading.Thread(target=self.downloadAndSaveBinary, args=(i, overwrite))
-            thread.start()
-            thread.join()
+        with ThreadPoolExecutor(max_workers=Config.downloader_threadnum) as executor:
+            for i in mj.getAllNativeUrl():
+                executor.submit(self.downloadAndSaveBinary, i, overwrite)
 
     def downloadAllFromMJ(self, mj: ManifestJson, useLocal=True, guess=False):
+        logger.info(f'Downloading {mj.manifestName}')
         nidImport = mj.getAllINDimportDownloadUrl()
         packImport = mj.getAllpackDownloadUrl()
         self.MTdownloadAndSetimport(mj, packImport, useLocal)
