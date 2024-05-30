@@ -159,4 +159,4 @@ class ManifestJson:
         for i, j in self.jsondata['paths'].items():
             if not i.isdigit():
                 i = self._getDebugResourceLocation(i)
-                self.assetList[int(i)].realPath = j[0]
+            self.assetList[int(i)].realPath = j[0]
