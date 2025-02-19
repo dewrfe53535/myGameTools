@@ -4,8 +4,8 @@ import os
 import re
 import requests
 import chompjs
-from tenacity import retry, stop_after_attempt, wait_fixed
 import json
+from tenacity import retry, stop_after_attempt, wait_fixed
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
@@ -32,10 +32,11 @@ session = Session()
 class assetDownloader:
     def __init__(self) -> None:
         self.baseurl = Config.downloader_weburl
-        self.manifestData_Dict = {}  # 清单的清单
-        self.manifestDataDict = {}
+        self.manifestOfmanifestData = {}  # 清单的清单
+        self.manifestData = {}
         self.jsurl = '/bin/assets/{typename}/index.{version}.js'
         self.configurl = '/bin/assets/{typename}/config.{version}.json'
+        self.downloadCallback = None
 
     def convertUrltoPath(self, url: str):
         url = urlparse(url)
@@ -50,6 +51,11 @@ class assetDownloader:
         if data.status_code // 100 != 2:
             return
         data = data.content
+        if self.downloadCallback:
+            isTakeOver = self.downloadCallback(url, path, data)
+            if isTakeOver:
+                return
+
         self.mkdir(path)
         with open(path, 'wb') as f:
             f.write(data)
@@ -67,7 +73,7 @@ class assetDownloader:
         data:主程序的jsdata
         '''
         settingdata = chompjs.parse_js_object(data)
-        self.manifestData_Dict = settingdata['bundleVers']
+        self.manifestOfmanifestData = settingdata['bundleVers']
         # 考虑到主程序相关js的更新可以直接在打开时被mitm替换，这里不做保存处理，让GFSI兜底
 
     def loadSettingFromWeb(self, url):
@@ -90,7 +96,7 @@ class assetDownloader:
         '''
         url form :host/1/bin/assets/{typename}/{index|config}.{version}.{.js|.json}
         '''
-        for i, j in self.manifestData_Dict.items():
+        for i, j in self.manifestOfmanifestData.items():
             url = Config.downloader_assetroot + self.jsurl.format(typename=i, version=j)  # set js url
             path = self.convertUrltoPath(url)
             if useLocal and os.path.exists(path):
@@ -107,7 +113,7 @@ class assetDownloader:
             else:
                 data = session.get(url).text
                 self.saveTextFile(path, data)
-            self.manifestDataDict[i] = json.loads(data)
+            self.manifestData[i] = json.loads(data)
 
     def downloadAndSetImport(self, mj: ManifestJson, url, point, useLocal=True):
         localPath = self.convertUrltoPath(url)
@@ -133,7 +139,7 @@ class assetDownloader:
                 executor.submit(self.downloadAndSaveBinary, i, overwrite)
 
     def downloadAllFromMJ(self, mj: ManifestJson, useLocal=True, guess=False):
-        logger.info(f'Downloading {mj.manifestName}')
+        mj.mapExt()
         nidImport = mj.getAllINDimportDownloadUrl()
         packImport = mj.getAllpackDownloadUrl()
         self.MTdownloadAndSetimport(mj, packImport, useLocal)
@@ -143,7 +149,7 @@ class assetDownloader:
         self.MTdownloadAllNative(mj, not (useLocal))
 
     def downloadAllFromManifest(self, useLocal=True, guess=False):
-        for i, j in self.manifestDataDict.items():
+        for i, j in self.manifestData.items():
             mj = ManifestJson(i, j)
             self.downloadAllFromMJ(mj, useLocal, guess)
 

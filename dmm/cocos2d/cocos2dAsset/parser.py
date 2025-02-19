@@ -1,4 +1,4 @@
-
+import copy
 from dataclasses import dataclass, field
 from .decodeUuid import decodeUuid
 from config import Config
@@ -11,6 +11,7 @@ class AssetInfo:
     importVersion: str = ''
     nativeVersion: str = ''
     uuid: str = ''
+    importExt: str = '.json'
     nativeExt: str = ''
     realPath: str = ''
 
@@ -31,14 +32,17 @@ class ManifestJson:
         versions = self.jsondata['versions']
         for i in range(0, len(versions['import']), 2):
             point = versions['import'][i]
-            if isinstance(point, int):
+            if len(puuid := self.assetList[point].uuid.split('@')[0]) == 9:  # for pack in new version,not sure
+                self.assetList[point].importType = 'PACKSOURCE'
+                self.packinfoDict[self.assetList[point].uuid] = PackInfo(versions['import'][i + 1])
+            elif isinstance(point, int):
                 self.assetList[point].importType = 'IND'
                 self.assetList[point].importVersion = versions['import'][i + 1]
             elif len(point) == 22:  # for debug resource
                 self.assetList[self._getDebugResourceLocation(point)].importType = 'IND'
                 self.assetList[self._getDebugResourceLocation(point)].importVersion = versions['import'][i + 1]
             else:
-                self.packinfoDict[point] = PackInfo(versions['import'][i + 1])
+                self.packinfoDict[point] = PackInfo(versions['import'][i + 1])  # not work in new version
         for i in range(0, len(versions['native']), 2):
             point = versions['native'][i]
             if isinstance(point, int):
@@ -46,7 +50,8 @@ class ManifestJson:
             else:
                 self.assetList[self._getDebugResourceLocation(point)].nativeVersion = versions['native'][i + 1]
         for i, j in self.jsondata['packs'].items():
-            self.packinfoDict[i].packPoint = j
+            if self.packinfoDict:
+                self.packinfoDict[i].packPoint = j
 
     def _getDebugResourceLocation(self, uuid):
         return self.jsondata['uuids'].index(uuid)
@@ -68,26 +73,49 @@ class ManifestJson:
         urlDict = {}
         for i, j in enumerate(self.assetList):
             if j.importVersion:
-                urlDict[i] = self.convertInfoToUrl('import', j.uuid, j.importVersion, '.json')
+                urlDict[i] = self.convertInfoToUrl('import', j.uuid, j.importVersion, j.importExt)
         return urlDict
 
-    def _parseTexture2D_Meta(self, data: str):
-        packConfig = data.split(',', 1)
-        match packConfig[0]:
-            case '0':
+    def _parseImageAsset(self, data):
+        # https://github.com/cocos/cocos-engine/blob/v3.8.6/cocos/asset/assets/image-asset.ts
+        extnames = ['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.pvr', '.pkm', '.astc']
+        if '_' in data:
+            data = data.split('_')[0]
+        if '@' in data:
+            data = data.split('@')[0]
+        return extnames[int(data)]
+
+    def _parseTexture2D_Meta(self, data):
+        packConfig = data.split(',', 1)[0] if isinstance(data, str) else data
+        match packConfig:
+            case '0' | 0:
                 return '.png'
-            case '1':
+            case '1' | 1:
                 return '.jpg'
+            case '2' | 2:
+                return ''  # TODO: softlink
+            case _:
+                logger.error(f'unknown format:{packConfig}')
 
     def _get_DictNativeExt(self, data: dict):
+        ext = []
         match data['type']:
             case 'cc.Texture2D':
-                ext = []
-                for i in data['data'].split('|'):
-                    ext.append(self._parseTexture2D_Meta(i))
+                # new version stub
+                if isinstance(data['data'], str):
+                    for i in data['data'].split('|'):
+                        ext.append(self._parseTexture2D_Meta(i))
+                else:
+                    for i in data['data']:
+                        ext.append(self._parseTexture2D_Meta(i[0]))
                 return ext
+            case  'cc.ImageAsset':
+                for i in data['data']:
+                    ext.append(self._parseImageAsset(i[5][0]['fmt']))
+
             case _:
                 logger.error(f'unknown data type:{data["type"]}')
+        return ext
 
     def _find_NativeExt(self, data):
         '''
@@ -117,6 +145,9 @@ class ManifestJson:
                 elif isinstance(data, str):
                     if data.count(',') == 7:
                         return self._parseTexture2D_Meta(data)
+                elif isinstance(data, dict):
+                    if 'fmt' in data:
+                        return self._parseTexture2D_Meta(data['fmt'])
 
             except (IndexError, TypeError, KeyError):
                 return
@@ -131,7 +162,11 @@ class ManifestJson:
         if isinstance(point, int):
             ext = self._find_NativeExt(packjsondata[5])
             if ext:
-                self.assetList[point].nativeExt = ext[0]
+                if self.assetList[point].nativeVersion:
+                    self.assetList[point].nativeExt = ext[0]
+                    if len(self.assetList[point].nativeExt) > 10:
+                        logger.warning(f'{point}-{self.assetList[i].uuid}-{self.assetList[point].nativeVersion} extension name is too long and may wrong.')
+                        self.assetList[point].nativeExt = ''
         elif isinstance(point, list) or isinstance(point, tuple):
             if isinstance(packjsondata, list):
                 ext = self._find_NativeExt(packjsondata[5])
@@ -140,10 +175,16 @@ class ManifestJson:
             if ext:
                 ext.reverse()
                 for i in point:
-                    if not isinstance(i, int):
+                    try:
+                        i = int(i)
+                    except ValueError:
                         i = self._getDebugResourceLocation(i)
                     if self.assetList[i].nativeVersion:
                         self.assetList[i].nativeExt = ext.pop()
+                        if len(self.assetList[i].nativeExt) > 10:
+                            logger.warning(f'{i}-{point}-{self.assetList[i].uuid}-{self.assetList[i].nativeVersion} extension name is too long and may wrong')
+                            self.assetList[i].nativeExt = ''
+                        self.assetList[i].importType = 'PACK'
 
     def getAllNativeUrl(self):
         urls = []
@@ -160,3 +201,8 @@ class ManifestJson:
             if not i.isdigit():
                 i = self._getDebugResourceLocation(i)
             self.assetList[int(i)].realPath = j[0]
+
+    def mapExt(self):
+        for i, j in self.jsondata['extensionMap'].items():
+            for point in j:
+                self.assetList[int(point)].importExt = i
