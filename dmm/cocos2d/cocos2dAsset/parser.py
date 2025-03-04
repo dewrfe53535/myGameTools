@@ -32,15 +32,15 @@ class ManifestJson:
         versions = self.jsondata['versions']
         for i in range(0, len(versions['import']), 2):
             point = versions['import'][i]
-            if len(puuid := self.assetList[point].uuid.split('@')[0]) == 9:  # for pack in new version,not sure
+            if isinstance(point,str):  # for debug resource
+                self.assetList[self._getDebugResourceLocation(point)].importType = 'IND'
+                self.assetList[self._getDebugResourceLocation(point)].importVersion = versions['import'][i + 1]
+            elif len(puuid := self.assetList[point].uuid.split('@')[0]) == 9:  # for pack in new version,not sure
                 self.assetList[point].importType = 'PACKSOURCE'
                 self.packinfoDict[self.assetList[point].uuid] = PackInfo(versions['import'][i + 1])
             elif isinstance(point, int):
                 self.assetList[point].importType = 'IND'
                 self.assetList[point].importVersion = versions['import'][i + 1]
-            elif len(point) == 22:  # for debug resource
-                self.assetList[self._getDebugResourceLocation(point)].importType = 'IND'
-                self.assetList[self._getDebugResourceLocation(point)].importVersion = versions['import'][i + 1]
             else:
                 self.packinfoDict[point] = PackInfo(versions['import'][i + 1])  # not work in new version
         for i in range(0, len(versions['native']), 2):
