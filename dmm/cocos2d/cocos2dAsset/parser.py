@@ -1,7 +1,6 @@
 import copy
 from dataclasses import dataclass, field
 from .decodeUuid import decodeUuid
-from config import Config
 from loguru import logger
 
 
@@ -23,7 +22,8 @@ class PackInfo:
 
 
 class ManifestJson:
-    def __init__(self, manifestName, jsondata: dict) -> None:
+    def __init__(self, manifestName, jsondata: dict, config: dict) -> None:
+        self.config = config
         self.jsondata = jsondata
         self.manifestName = manifestName
         self.localImportPath = ''
@@ -61,7 +61,7 @@ class ManifestJson:
         restype:native or import
         下载文件采用fiddler的导出结构(/域名/path)
         '''
-        return '/'.join([Config.asset_baseurl, self.manifestName, resType, resid[:2], f'{resid}.{version}{ext}'])
+        return '/'.join([self.config['asset_baseurl'], self.manifestName, resType, resid[:2], f'{resid}.{version}{ext}'])
 
     def getAllpackDownloadUrl(self):
         packurlDict = {}

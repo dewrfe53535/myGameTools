@@ -1,5 +1,4 @@
 from .parser import ManifestJson, AssetInfo
-from config import Config
 import os
 import re
 import requests
@@ -30,8 +29,9 @@ session = Session()
 
 
 class assetDownloader:
-    def __init__(self) -> None:
-        self.baseurl = Config.downloader_weburl
+    def __init__(self, config: dict) -> None:
+        self.config = config
+        self.baseurl = self.config['downloader_weburl']
         self.manifestOfmanifestData = {}  # 清单的清单
         self.manifestData = {}
         self.jsurl = '/bin/assets/{typename}/index.{version}.js'
@@ -40,7 +40,7 @@ class assetDownloader:
 
     def convertUrltoPath(self, url: str):
         url = urlparse(url)
-        return os.path.join(Config.downloader_savepath, url.netloc.replace(':', '#COLON#'), url.path.strip('/'))
+        return os.path.join(self.config['downloader_savepath'], url.netloc.replace(':', '#COLON#'), url.path.strip('/'))
 
     def downloadAndSaveBinary(self, url, overwrite=False):
         path = self.convertUrltoPath(url)
@@ -85,7 +85,7 @@ class assetDownloader:
         match = re.search(pattern, webdata)
         if match:
             setting_url = match.group(1)
-            setting_url = Config.downloader_assetroot + eval(setting_url)
+            setting_url = self.config['downloader_assetroot'] + eval(setting_url)
         else:
             raise ValueError("failed to find setting url")
         settingdata = session.get(setting_url).text
@@ -97,7 +97,7 @@ class assetDownloader:
         url form :host/1/bin/assets/{typename}/{index|config}.{version}.{.js|.json}
         '''
         for i, j in self.manifestOfmanifestData.items():
-            url = Config.downloader_assetroot + self.jsurl.format(typename=i, version=j)  # set js url
+            url = self.config['downloader_assetroot'] + self.jsurl.format(typename=i, version=j)  # set js url
             path = self.convertUrltoPath(url)
             if useLocal and os.path.exists(path):
                 pass
@@ -105,7 +105,7 @@ class assetDownloader:
                 data = session.get(url).text
                 self.saveTextFile(path, data)
 
-            url = Config.downloader_assetroot + self.configurl.format(typename=i, version=j)  # set configurl
+            url = self.config['downloader_assetroot'] + self.configurl.format(typename=i, version=j)  # set configurl
             path = self.convertUrltoPath(url)
             if useLocal and os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
@@ -129,12 +129,12 @@ class assetDownloader:
         self.saveTextFile(localPath, importData)
 
     def MTdownloadAndSetimport(self, mj: ManifestJson, downloadDict: dict, useLocal=True):
-        with ThreadPoolExecutor(max_workers=Config.downloader_threadnum) as executor:
+        with ThreadPoolExecutor(max_workers=self.config['downloader_threadnum']) as executor:
             for point, url in downloadDict.items():
                 executor.submit(self.downloadAndSetImport, mj, url, point, useLocal)
 
     def MTdownloadAllNative(self, mj: ManifestJson, overwrite=False):
-        with ThreadPoolExecutor(max_workers=Config.downloader_threadnum) as executor:
+        with ThreadPoolExecutor(max_workers=self.config['downloader_threadnum']) as executor:
             for i in mj.getAllNativeUrl():
                 executor.submit(self.downloadAndSaveBinary, i, overwrite)
 
@@ -150,7 +150,7 @@ class assetDownloader:
 
     def downloadAllFromManifest(self, useLocal=True, guess=False):
         for i, j in self.manifestData.items():
-            mj = ManifestJson(i, j)
+            mj = ManifestJson(i, j, self.config)
             self.downloadAllFromMJ(mj, useLocal, guess)
 
     def guessNativeExt(self, mj: ManifestJson, asset: AssetInfo):
