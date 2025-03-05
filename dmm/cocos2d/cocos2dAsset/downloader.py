@@ -30,6 +30,15 @@ session = Session()
 
 class assetDownloader:
     def __init__(self, config: dict) -> None:
+        '''
+        config: {
+            'downloader_weburl': '',
+            'downloader_assetroot': '',  # 用于下载manifest的地址前缀
+            'downloader_savepath': '', # 保存位置
+            'downloader_threadnum': 10,
+            'asset_baseurl': '', # 用于manifestJson拼接的地址前缀
+        }
+        '''
         self.config = config
         self.baseurl = self.config['downloader_weburl']
         self.manifestOfmanifestData = {}  # 清单的清单
