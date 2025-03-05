@@ -1,4 +1,3 @@
-import copy
 from dataclasses import dataclass, field
 from .decodeUuid import decodeUuid
 from loguru import logger
@@ -32,7 +31,7 @@ class ManifestJson:
         versions = self.jsondata['versions']
         for i in range(0, len(versions['import']), 2):
             point = versions['import'][i]
-            if isinstance(point,str):  # for debug resource
+            if isinstance(point, str):  # for debug resource
                 self.assetList[self._getDebugResourceLocation(point)].importType = 'IND'
                 self.assetList[self._getDebugResourceLocation(point)].importVersion = versions['import'][i + 1]
             elif len(puuid := self.assetList[point].uuid.split('@')[0]) == 9:  # for pack in new version,not sure
