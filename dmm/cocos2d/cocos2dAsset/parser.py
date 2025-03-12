@@ -31,15 +31,16 @@ class ManifestJson:
         versions = self.jsondata['versions']
         for i in range(0, len(versions['import']), 2):
             point = versions['import'][i]
-            if isinstance(point, str):  # for debug resource
+            if isinstance(point,str) and len(point) > 10:  # for debug resource,assume old pack length < 10
                 self.assetList[self._getDebugResourceLocation(point)].importType = 'IND'
                 self.assetList[self._getDebugResourceLocation(point)].importVersion = versions['import'][i + 1]
-            elif len(puuid := self.assetList[point].uuid.split('@')[0]) == 9:  # for pack in new version,not sure
-                self.assetList[point].importType = 'PACKSOURCE'
-                self.packinfoDict[self.assetList[point].uuid] = PackInfo(versions['import'][i + 1])
             elif isinstance(point, int):
-                self.assetList[point].importType = 'IND'
-                self.assetList[point].importVersion = versions['import'][i + 1]
+                if len(puuid := self.assetList[point].uuid.split('@')[0]) == 9:  # for pack in new version,not sure
+                    self.assetList[point].importType = 'PACKSOURCE'
+                    self.packinfoDict[self.assetList[point].uuid] = PackInfo(versions['import'][i + 1])
+                else:
+                    self.assetList[point].importType = 'IND'
+                    self.assetList[point].importVersion = versions['import'][i + 1]
             else:
                 self.packinfoDict[point] = PackInfo(versions['import'][i + 1])  # not work in new version
         for i in range(0, len(versions['native']), 2):
@@ -202,6 +203,7 @@ class ManifestJson:
             self.assetList[int(i)].realPath = j[0]
 
     def mapExt(self):
-        for i, j in self.jsondata['extensionMap'].items():
-            for point in j:
-                self.assetList[int(point)].importExt = i
+        if 'extensionMap' in self.jsondata:
+            for i, j in self.jsondata['extensionMap'].items():
+                for point in j:
+                    self.assetList[int(point)].importExt = i
