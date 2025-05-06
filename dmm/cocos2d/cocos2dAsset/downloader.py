@@ -1,4 +1,6 @@
+from threading import local
 from .parser import ManifestJson, AssetInfo
+from typing import Type
 import os
 import re
 import requests
@@ -18,6 +20,7 @@ class Session(requests.Session):
     )
     def request(self, method, url, **kwargs):
         resp = super().request(method, url, timeout=10, **kwargs)
+        logger.debug(url,method)
         if resp.status_code // 100 != 2:
             logger.warning(f'http {resp.status_code} ,failed to fetch {url}')
         if resp.status_code // 100 == 5:
@@ -32,7 +35,7 @@ class assetDownloader:
     def __init__(self, config: dict) -> None:
         '''
         config: {
-            'downloader_weburl': '',
+            'downloader_weburl': '', # 不填，仅适用于部分老版本
             'downloader_assetroot': '',  # 用于下载manifest的地址前缀
             'downloader_savepath': '', # 保存位置
             'downloader_threadnum': 10,
@@ -42,10 +45,16 @@ class assetDownloader:
         self.config = config
         self.baseurl = self.config['downloader_weburl']
         self.manifestOfmanifestData = {}  # 清单的清单
+        self.remoteBundles = []
+        self.remoteUrl = ''
         self.manifestData = {}
         self.jsurl = '/bin/assets/{typename}/index.{version}.js'
         self.configurl = '/bin/assets/{typename}/config.{version}.json'
-        self.downloadCallback = None
+        self.downloadCallback = None # 会传递url,path,data，返回值为True则不继续做保存处理
+        self.customManifestJson :Type[ManifestJson] = None 
+
+    def _loadJson(self,jsondata):
+        return json.loads(jsondata)
 
     def convertUrltoPath(self, url: str):
         url = urlparse(url)
@@ -73,10 +82,15 @@ class assetDownloader:
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
     def saveTextFile(self, path, data):
+        '''
+        use bytes because some games use encryption
+        '''
         self.mkdir(path)
-        with open(path, 'w+', encoding='utf-8') as f:
+        if isinstance(data, str):
+            data = data.encode()
+        with open(path, 'wb') as f:
             f.write(data)
-
+        
     def loadFirstManifest(self, data: str):
         '''
         data:主程序的jsdata
@@ -87,7 +101,7 @@ class assetDownloader:
 
     def loadSettingFromWeb(self, url):
         '''
-        从网页中找到主设置文件
+        从网页中找到主设置文件，仅适用于部分老版本
         '''
         webdata = session.get(self.baseurl).text
         pattern = r'let settingUrl = window.asset_root\(\) \+ (.*?);'
@@ -105,36 +119,46 @@ class assetDownloader:
         '''
         url form :host/1/bin/assets/{typename}/{index|config}.{version}.{.js|.json}
         '''
-        for i, j in self.manifestOfmanifestData.items():
-            url = self.config['downloader_assetroot'] + self.jsurl.format(typename=i, version=j)  # set js url
+        for i, j in self.manifestOfmanifestData.items():    
+            if i in self.remoteBundles:
+                url= self.remoteUrl + self.jsurl.format(typename=i, version=j)
+            else:
+                url = self.config['downloader_assetroot'] + self.jsurl.format(typename=i, version=j)  # set js url
             path = self.convertUrltoPath(url)
             if useLocal and os.path.exists(path):
                 pass
             else:
-                data = session.get(url).text
+                data = session.get(url).content
                 self.saveTextFile(path, data)
-
-            url = self.config['downloader_assetroot'] + self.configurl.format(typename=i, version=j)  # set configurl
+            if i in self.remoteBundles:
+                url= self.remoteUrl + self.configurl.format(typename=i, version=j)
+            else:
+                url = self.config['downloader_assetroot'] + self.configurl.format(typename=i, version=j)  # set configurl
             path = self.convertUrltoPath(url)
             if useLocal and os.path.exists(path):
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(path, 'rb') as f:
                     data = f.read()
             else:
-                data = session.get(url).text
+                data = session.get(url).content
                 self.saveTextFile(path, data)
-            self.manifestData[i] = json.loads(data)
+            self.manifestData[i] = self._loadJson(data)
 
     def downloadAndSetImport(self, mj: ManifestJson, url, point, useLocal=True):
         localPath = self.convertUrltoPath(url)
         if useLocal and os.path.exists(localPath):
-            with open(localPath, 'r', encoding='utf-8') as f:
+            with open(localPath, 'rb') as f:
                 importData = f.read()
         else:
-            importData = session.get(url).text
+            importData = session.get(url).content
         if not importData:
             logger.error(f'{url} importData is None.')
             return
-        mj.setInfoFromimport(point, json.loads(importData))
+        if url.endswith('json'):
+            mj.setInfoFromimport(point, self._loadJson(importData),os.path.basename(url))
+        else:
+            logger.warning(f'not know how to parse import {url}')
+        if useLocal and os.path.exists(localPath):
+            return
         self.saveTextFile(localPath, importData)
 
     def MTdownloadAndSetimport(self, mj: ManifestJson, downloadDict: dict, useLocal=True):
@@ -157,9 +181,23 @@ class assetDownloader:
             self.guesAllNotSetNativeExt(mj)
         self.MTdownloadAllNative(mj, not (useLocal))
 
+    def getMJfromName(self, name):
+        mj = ManifestJson(name, self.manifestData[name], self.config) if not self.customManifestJson else self.customManifestJson(name, self.manifestData[name], self.config)
+        if name in self.remoteBundles:
+            mj.remoteUrl = self.remoteUrl
+        return mj
+
+    def downloadFromSingleManifest(self, manifestName, useLocal=True, guess=False):
+        mj = ManifestJson(manifestName, self.manifestData[manifestName], self.config) if not self.customManifestJson else self.customManifestJson(manifestName, self.manifestData[manifestName], self.config)
+        if manifestName in self.remoteBundles:
+            mj.remoteUrl = self.remoteUrl
+        self.downloadAllFromMJ(mj, useLocal, guess)
+
     def downloadAllFromManifest(self, useLocal=True, guess=False):
         for i, j in self.manifestData.items():
-            mj = ManifestJson(i, j, self.config)
+            mj = ManifestJson(i, j, self.config) if not self.customManifestJson else self.customManifestJson(i, j, self.config)
+            if i in self.remoteBundles:
+                mj.remoteUrl = self.remoteUrl
             self.downloadAllFromMJ(mj, useLocal, guess)
 
     def guessNativeExt(self, mj: ManifestJson, asset: AssetInfo):

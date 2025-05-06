@@ -12,7 +12,9 @@ class AssetInfo:
     importExt: str = '.json'
     nativeExt: str = ''
     realPath: str = ''
-
+    reference: list =  field(default_factory=list)
+    importFrom: str = ''
+    referenceFrom : list = field(default_factory=list)
 
 @dataclass
 class PackInfo:
@@ -28,6 +30,7 @@ class ManifestJson:
         self.localImportPath = ''
         self.assetList = [AssetInfo(uuid=decodeUuid(i)) for i in self.jsondata['uuids']]
         self.packinfoDict = {}
+        self.remoteUrl = ''
         versions = self.jsondata['versions']
         for i in range(0, len(versions['import']), 2):
             point = versions['import'][i]
@@ -56,12 +59,19 @@ class ManifestJson:
     def _getDebugResourceLocation(self, uuid):
         return self.jsondata['uuids'].index(uuid)
 
-    def convertInfoToUrl(self, resType, resid, version, ext):
+    def convertInfoToUrl(self, resType, resid, version, ext,custom_url = None):
         '''
         restype:native or import
         下载文件采用fiddler的导出结构(/域名/path)
+        custom_url > remote_url> default
         '''
-        return '/'.join([self.config['asset_baseurl'], self.manifestName, resType, resid[:2], f'{resid}.{version}{ext}'])
+        if custom_url:
+            baseurl = custom_url
+        elif self.remoteUrl:
+            baseurl = self.remoteUrl
+        else:    
+            baseurl = self.config['asset_baseurl']
+        return '/'.join([baseurl, self.manifestName, resType, resid[:2], f'{resid}.{version}{ext}'])
 
     def getAllpackDownloadUrl(self):
         packurlDict = {}
@@ -93,7 +103,9 @@ class ManifestJson:
             case '1' | 1:
                 return '.jpg'
             case '2' | 2:
-                return ''  # TODO: softlink
+                return '*softlink*'
+            case '4' |4:
+                return '.webp'
             case _:
                 logger.error(f'unknown format:{packConfig}')
 
@@ -107,7 +119,14 @@ class ManifestJson:
                         ext.append(self._parseTexture2D_Meta(i))
                 else:
                     for i in data['data']:
-                        ext.append(self._parseTexture2D_Meta(i[0]))
+                        tmpext = self._parseTexture2D_Meta(i[0])
+                        if tmpext == '*softlink*':
+                            referencelist_d = []
+                            for j in i[1]:
+                                referencelist_d.append(decodeUuid(j))
+                            ext.append(referencelist_d)
+                        else:
+                            ext.append(tmpext)
                 return ext
             case  'cc.ImageAsset':
                 for i in data['data']:
@@ -158,7 +177,7 @@ class ManifestJson:
 
         return extList
 
-    def setInfoFromimport(self, point: int | list[int] | tuple[int], packjsondata: list | dict):
+    def setInfoFromimport(self, point: int | list[int] | tuple[int], packjsondata: list | dict,importName=  ''):
         if isinstance(point, int):
             ext = self._find_NativeExt(packjsondata[5])
             if ext:
@@ -170,6 +189,15 @@ class ManifestJson:
         elif isinstance(point, list) or isinstance(point, tuple):
             if isinstance(packjsondata, list):
                 ext = self._find_NativeExt(packjsondata[5])
+                try:
+                    if isinstance(packjsondata[1], list):
+                        for i in packjsondata[1]:
+                            uuid = decodeUuid(i)
+                            for j in self.assetList:
+                                if j.uuid == uuid:
+                                    j.referenceFrom.append(importName)
+                except Exception as e:
+                    logger.error(f'{self.manifestName}-{point}-{e} no reference list')
             elif isinstance(packjsondata, dict):
                 ext = self._get_DictNativeExt(packjsondata)
             if ext:
@@ -179,12 +207,22 @@ class ManifestJson:
                         i = int(i)
                     except ValueError:
                         i = self._getDebugResourceLocation(i)
-                    if self.assetList[i].nativeVersion:
-                        self.assetList[i].nativeExt = ext.pop()
+                    isRef = False    
+                    if isinstance(ext[0],list):
+                        isRef = True
+                    if self.assetList[i].nativeVersion or isRef:
+                        tmpext = ext.pop()
+                        if  isinstance(tmpext, list):
+                            self.assetList[i].reference = tmpext
+                        else:
+                            self.assetList[i].nativeExt = tmpext
                         if len(self.assetList[i].nativeExt) > 10:
                             logger.warning(f'{i}-{point}-{self.assetList[i].uuid}-{self.assetList[i].nativeVersion} extension name is too long and may wrong')
                             self.assetList[i].nativeExt = ''
                         self.assetList[i].importType = 'PACK'
+                        if importName:
+                            self.assetList[i].importFrom = importName
+                            
 
     def getAllNativeUrl(self):
         urls = []
@@ -192,6 +230,8 @@ class ManifestJson:
             if i.nativeVersion:
                 if i.nativeExt:
                     urls.append(self.convertInfoToUrl('native', i.uuid, i.nativeVersion, i.nativeExt))
+                elif i.importType == 'PACKSOURCE':
+                        pass
                 else:
                     logger.warning(f'{self.manifestName}-{i.uuid}-{i.nativeVersion} does not have a extension name.This will NOT add to download list.')
         return urls
