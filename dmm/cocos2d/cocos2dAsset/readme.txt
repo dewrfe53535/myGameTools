@@ -1,0 +1,1 @@
+Moved to dewrfe53535/cocos_downloader.
